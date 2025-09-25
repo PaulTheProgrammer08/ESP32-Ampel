@@ -1,110 +1,52 @@
-<!DOCTYPE html>
+<!-- index.html -->
+<!doctype html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <title>ESP32 BLE Sensor WebApp</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 40px; }
-    #sensor-value { font-size: 2em; margin: 20px 0; }
-    .btn { padding: 10px 20px; font-size: 1em; margin: 5px; }
-    #status { margin: 10px 0; color: #555; }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ampel BLE Control</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h1>ESP32 BLE Sensor WebApp</h1>
-  <button id="connect-btn" class="btn">Mit ESP32 verbinden</button>
-  <div id="status">Status: Nicht verbunden</div>
-  <div>
-    <strong>Sensorwert:</strong>
-    <span id="sensor-value">---</span>
-  </div>
-  <div>
-    <button id="led-on-btn" class="btn" disabled>LED AN</button>
-    <button id="led-off-btn" class="btn" disabled>LED AUS</button>
-  </div>
+  <header>
+    <h1>Ampel BLE Control</h1>
+    <div id="status">Status: <span id="statustxt">Nicht verbunden</span></div>
+  </header>
 
-  <script>
-    // UUIDs wie im Python Code
-    const SERVICE_UUID        = "19b10000-e8f2-537e-4f6c-d104768a1214";
-    const SENSOR_CHAR_UUID    = "19b10001-e8f2-537e-4f6c-d104768a1214";
-    const LED_CHAR_UUID       = "19b10002-e8f2-537e-4f6c-d104768a1214";
+  <main>
+    <div class="controls">
+      <button id="btnConnect">Verbinden</button>
+      <button id="btnDisconnect" disabled>Trennen</button>
+    </div>
 
-    let device = null;
-    let server = null;
-    let sensorCharacteristic = null;
-    let ledCharacteristic = null;
+    <section class="modes">
+      <h2>Modi</h2>
+      <button class="mode" data-mode="stop">Stop</button>
+      <button class="mode" data-mode="lauflicht">Lauflicht</button>
+      <button class="mode" data-mode="blinken">Blinken</button>
+      <button class="mode" data-mode="fading">Fading</button>
+      <button class="mode" data-mode="mode0">Mode0</button>
+      <button class="mode" data-mode="mode3">Mode3</button>
+    </section>
 
-    const connectBtn = document.getElementById('connect-btn');
-    const ledOnBtn = document.getElementById('led-on-btn');
-    const ledOffBtn = document.getElementById('led-off-btn');
-    const sensorValue = document.getElementById('sensor-value');
-    const status = document.getElementById('status');
+    <section class="speed">
+      <h2>Geschwindigkeit</h2>
+      <input id="speed" type="range" min="50" max="2000" value="200" />
+      <span id="speedVal">200</span> ms
+    </section>
 
-    // Hilfsfunktion zum Status anzeigen
-    function showStatus(msg) {
-      status.textContent = "Status: " + msg;
-    }
+    <section class="direct">
+      <h2>Direktsteuerung</h2>
+      <input id="directCmd" placeholder="z.B. 0:512;2:1023" />
+      <button id="sendDirect">Senden</button>
+    </section>
 
-    // Sensorwert-Notifications empfangen
-    function handleSensorValue(event) {
-      const value = new TextDecoder().decode(event.target.value);
-      sensorValue.textContent = value;
-    }
+    <section class="log">
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </section>
+  </main>
 
-    // Verbindung herstellen und BLE-Services/Characteristics holen
-    async function connect() {
-      try {
-        showStatus("Verbindung wird aufgebaut...");
-        device = await navigator.bluetooth.requestDevice({
-          filters: [{ name: "ESP32" }],
-          optionalServices: [SERVICE_UUID]
-        });
-        device.addEventListener('gattserverdisconnected', onDisconnected);
-
-        server = await device.gatt.connect();
-        const service = await server.getPrimaryService(SERVICE_UUID);
-        sensorCharacteristic = await service.getCharacteristic(SENSOR_CHAR_UUID);
-        ledCharacteristic = await service.getCharacteristic(LED_CHAR_UUID);
-
-        // Notifications abonnieren
-        await sensorCharacteristic.startNotifications();
-        sensorCharacteristic.addEventListener('characteristicvaluechanged', handleSensorValue);
-
-        // Gleich mal den aktuellen Wert abfragen
-        const val = await sensorCharacteristic.readValue();
-        sensorValue.textContent = new TextDecoder().decode(val);
-
-        ledOnBtn.disabled = false;
-        ledOffBtn.disabled = false;
-        showStatus("Verbunden mit ESP32!");
-
-      } catch (error) {
-        showStatus("Fehler bei Verbindung: " + error);
-      }
-    }
-
-    // LED AN senden
-    async function ledOn() {
-      if (!ledCharacteristic) return;
-      await ledCharacteristic.writeValue(Uint8Array.of(1));
-    }
-    // LED AUS senden
-    async function ledOff() {
-      if (!ledCharacteristic) return;
-      await ledCharacteristic.writeValue(Uint8Array.of(0));
-    }
-
-    // Disconnected-Handler
-    function onDisconnected() {
-      showStatus("Verbindung getrennt");
-      ledOnBtn.disabled = true;
-      ledOffBtn.disabled = true;
-    }
-
-    connectBtn.addEventListener('click', connect);
-    ledOnBtn.addEventListener('click', ledOn);
-    ledOffBtn.addEventListener('click', ledOff);
-
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

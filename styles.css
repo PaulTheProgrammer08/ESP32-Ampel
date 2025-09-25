@@ -1,0 +1,11 @@
+/* styles.css */
+body { font-family: Arial, Helvetica, sans-serif; margin: 12px; color:#111; }
+header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
+h1 { margin:0; font-size:1.2rem; }
+.controls { margin-bottom:10px; }
+button { margin:4px; padding:8px 12px; }
+.modes { margin:10px 0; }
+.mode { min-width:110px; }
+.speed, .direct, .log { margin-top:10px; }
+#log { background:#f5f5f5; padding:8px; height:160px; overflow:auto; white-space:pre-wrap; }
+#statustxt { font-weight:600; }

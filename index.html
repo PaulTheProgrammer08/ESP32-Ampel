@@ -2,70 +2,79 @@
 <html lang="de">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Ampel BLE Control</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
-    <h1>Ampel BLE Control</h1>
-    <div id="topRight">
-      <div id="status"><span id="statustxt">Nicht verbunden</span></div>
-      <div class="connect-row">
-        <button id="btnConnect" class="btn primary">Verbinden</button>
-        <button id="btnDisconnect" class="btn" disabled>Trennen</button>
+  <div class="app">
+    <header class="topbar">
+      <h1>Ampel BLE Control</h1>
+      <div class="conn">
+        <span id="statustxt">Nicht verbunden</span>
+        <button id="btnConnect">Verbinden</button>
+        <button id="btnDisconnect" disabled>Trennen</button>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <main>
-    <section id="traffic-wrap">
-      <div id="traffic" role="group" aria-label="Ampel">
-        <button class="light red" data-idx="0" aria-pressed="false" title="Rot"></button>
-        <button class="light yellow" data-idx="1" aria-pressed="false" title="Gelb"></button>
-        <button class="light green" data-idx="2" aria-pressed="false" title="Grün"></button>
-      </div>
-
-      <div id="controls">
-        <div class="modes">
-          <h2>Programme</h2>
-          <div class="mode-row">
-            <button class="mode btn" data-mode="stop">Stop</button>
-            <button class="mode btn" data-mode="lauflicht">Lauflicht</button>
-            <button class="mode btn" data-mode="blinken">Blinken</button>
+    <main>
+      <aside class="panel left">
+        <section class="card">
+          <h2>Modus</h2>
+          <div class="modes">
+            <button class="mode" data-mode="stop">Stop</button>
+            <button class="mode" data-mode="lauflicht">Lauflicht</button>
+            <button class="mode" data-mode="blinken">Blinken</button>
+            <button class="mode" data-mode="fading">Fading</button>
           </div>
-          <div class="mode-row">
-            <button class="mode btn" data-mode="fading">Fading</button>
-            <button class="mode btn" data-mode="mode0">Mode0</button>
-            <button class="mode btn" data-mode="mode3">Mode3</button>
-          </div>
-        </div>
+        </section>
 
-        <div class="speed">
+        <section class="card">
           <h2>Geschwindigkeit</h2>
           <div class="speed-row">
             <input id="speed" type="range" min="50" max="2000" value="200" />
-            <output id="speedVal">200</output><span> ms</span>
+            <div class="speed-val"><span id="speedVal">200</span> ms</div>
           </div>
+        </section>
+
+        <section class="card">
+          <h2>Direkt</h2>
+          <input id="directCmd" placeholder="z.B. 0:512,2:1023 oder rot / aus" />
+          <div style="margin-top:8px;">
+            <button id="sendDirect">Senden</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="panel center">
+        <div class="card ampel-card">
+          <h2>Ampel</h2>
+          <div id="ampelContainer">
+            <div id="led0" class="led" data-idx="0" title="Rot"></div>
+            <div id="led1" class="led" data-idx="1" title="Gelb"></div>
+            <div id="led2" class="led" data-idx="2" title="Grün"></div>
+          </div>
+          <div class="hint">Klicken, um LED (optimistisch) zu toggeln</div>
         </div>
 
-        <div class="direct-quick">
-          <h2>Schnellsteuerung</h2>
-          <div class="quick-row">
-            <button class="quick btn red" data-cmd="0:1023">Rot Ein</button>
-            <button class="quick btn yellow" data-cmd="1:1023">Gelb Ein</button>
-            <button class="quick btn green" data-cmd="2:1023">Grün Ein</button>
-            <button class="quick btn" data-cmd="0:0;1:0;2:0">Alle Aus</button>
-          </div>
+        <div class="card status-card">
+          <h3>Status</h3>
+          <div id="statusJson">—</div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="log">
-      <h2>Log</h2>
-      <pre id="log"></pre>
-    </section>
-  </main>
+      <aside class="panel right">
+        <section class="card log-card">
+          <h2>Log</h2>
+          <pre id="log"></pre>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="foot">
+      <small>ESP32 Ampel — BLE Control UI</small>
+    </footer>
+  </div>
 
   <script src="app.js"></script>
 </body>

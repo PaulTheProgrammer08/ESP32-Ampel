@@ -1,208 +1,221 @@
-// app.js (mobilfreundlich, interaktive Ampel, BLE-Kommandos)
+// app.js (web bluetooth, uses STATUS notifications)
 const SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0";
 const CHAR_MODE = "12345678-1234-5678-1234-56789abcdef1";
 const CHAR_SPEED = "12345678-1234-5678-1234-56789abcdef2";
 const CHAR_LED = "12345678-1234-5678-1234-56789abcdef3";
+const CHAR_STATUS = "12345678-1234-5678-1234-56789abcdef4"; // neu
 
-let device=null, server=null, svc=null, modeChar=null, speedChar=null, ledChar=null;
-const logEl = document.getElementById("log");
-const statustxt = document.getElementById("statustxt");
+let device=null, server=null, svc=null;
+let modeChar=null, speedChar=null, ledChar=null, statusChar=null;
+let statusPoll = null;
+let ledStates = [0,0,0];
+
 const btnConnect = document.getElementById("btnConnect");
 const btnDisconnect = document.getElementById("btnDisconnect");
+const statustxt = document.getElementById("statustxt");
+const logEl = document.getElementById("log");
 const speedSlider = document.getElementById("speed");
 const speedVal = document.getElementById("speedVal");
-const lights = Array.from(document.querySelectorAll(".light"));
-const modeButtons = Array.from(document.querySelectorAll(".mode"));
-const quickButtons = Array.from(document.querySelectorAll(".quick"));
+const directCmd = document.getElementById("directCmd");
+const sendDirect = document.getElementById("sendDirect");
 
-function log(s){
-  const t = `[${new Date().toLocaleTimeString()}] ${s}`;
-  logEl.textContent += t + "\n";
-  logEl.scrollTop = logEl.scrollHeight;
-  console.log(s);
-}
+function log(s){ console.log(s); logEl.textContent += s + "\n"; logEl.scrollTop = logEl.scrollHeight; }
 function setStatus(s){ statustxt.textContent = s; }
 
 btnConnect.addEventListener("click", connect);
 btnDisconnect.addEventListener("click", disconnect);
-
-speedSlider.addEventListener("input", ()=> { speedVal.textContent = speedSlider.value; });
-speedSlider.addEventListener("change", ()=> sendSpeed(speedSlider.value) );
-
-// Light click: toggles local visual and sends direct command
-lights.forEach(btn=>{
-  btn.addEventListener("click", async ()=>{
-    const idx = btn.dataset.idx;
-    const pressed = btn.getAttribute("aria-pressed")==="true";
-    const newState = !pressed;
-    btn.setAttribute("aria-pressed", newState ? "true" : "false");
-    // send direct command full on or off
-    await sendDirectCmd(`${idx}:${newState?1023:0}`);
+document.querySelectorAll(".mode").forEach(b=> b.addEventListener("click", ()=> sendMode(b.dataset.mode)));
+speedSlider.addEventListener("input", ()=> speedVal.textContent = speedSlider.value);
+speedSlider.addEventListener("change", ()=> sendSpeed(speedSlider.value));
+sendDirect.addEventListener("click", ()=> sendDirectCmd(directCmd.value));
+document.querySelectorAll(".led").forEach(el=>{
+  el.addEventListener("click", async ()=>{
+    const idx = el.dataset.idx;
+    const cur = ledStates[idx]||0;
+    const cmd = (cur>0) ? `${idx}:0` : `${idx}:1023`;
+    await sendDirectCmd(cmd);
+    ledStates[idx] = (cur>0)?0:1023;
+    renderLeds();
   });
 });
 
-// Quick commands
-quickButtons.forEach(b=>{
-  b.addEventListener("click", ()=> {
-    const cmd = b.dataset.cmd;
-    sendDirectCmd(cmd);
-    // reflect on UI: set lights according to cmd (simple parse)
-    applyDirectToUI(cmd);
-  });
-});
-
-// Mode buttons
-modeButtons.forEach(b=>{
-  b.addEventListener("click", ()=> {
-    const m = b.dataset.mode;
-    sendMode(m);
-    // if it's a program, play local animation preview
-    playLocalAnimation(m);
-  });
-});
-
-// UI helper to parse direct string and update UI bulbs
-function applyDirectToUI(cmd){
-  try{
-    const parts = cmd.split(";").map(p=>p.trim()).filter(Boolean);
-    parts.forEach(p=>{
-      const [i,v] = p.split(":").map(x=>x.trim());
-      const idx = Number(i);
-      const val = Number(v);
-      if(!isNaN(idx) && lights[idx]){
-        lights[idx].setAttribute("aria-pressed", val>0 ? "true" : "false");
-      }
-    });
-  }catch(e){}
-}
-
-// BLE connect / setup
 async function connect(){
-  try{
+  try {
     log("Starte Scan...");
-    device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: [SERVICE_UUID]
-    });
-    log("Gerät gewählt: " + (device.name||"unnamed"));
+    device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SERVICE_UUID] });
+    log("Gewählt: " + (device.name||"unnamed"));
     setStatus("Verbinde...");
     server = await device.gatt.connect();
-    log("GATT verbunden");
     svc = await server.getPrimaryService(SERVICE_UUID);
-    modeChar  = await svc.getCharacteristic(CHAR_MODE);
+    modeChar = await svc.getCharacteristic(CHAR_MODE);
     speedChar = await svc.getCharacteristic(CHAR_SPEED);
-    ledChar   = await svc.getCharacteristic(CHAR_LED);
-    setStatus("Verbunden: " + (device.name||"ESP"));
+    ledChar = await svc.getCharacteristic(CHAR_LED);
+    // try to get status char (new)
+    try{
+      statusChar = await svc.getCharacteristic(CHAR_STATUS);
+      await statusChar.startNotifications();
+      statusChar.addEventListener('characteristicvaluechanged', onStatusNotification);
+      log("Status-Char abonniert");
+    }catch(e){
+      log("Status-Char nicht verfügbar (falls alte Firmware).");
+      statusChar = null;
+    }
+    setStatus("Verbunden: " + (device.name||"unnamed"));
     btnConnect.disabled = true; btnDisconnect.disabled = false;
     device.addEventListener("gattserverdisconnected", onDisconnected);
-    log("Characteristics bereit");
-    // optional: read initial state from chars if implemented
-  }catch(err){
-    log("Verbindung fehlgeschlagen: " + err);
+    // initial read (if available)
+    await readAllOnce();
+    // fallback poll (nur wenn keine notifications)
+    if(!statusChar){
+      statusPoll = setInterval(readAllOnce, 1000);
+    }
+  } catch (e){
+    log("Connect-Fehler: " + e);
     setStatus("Nicht verbunden");
   }
 }
 
 async function disconnect(){
-  try{
-    if(device && device.gatt.connected){
-      device.gatt.disconnect();
-      log("Getrennt");
-    }
-  }catch(e){ log("Disconnect-Error: "+e); }
-  btnConnect.disabled = false; btnDisconnect.disabled = true;
-  setStatus("Nicht verbunden");
-}
-
-function onDisconnected(){
-  log("Device disconnected");
+  try {
+    if(statusPoll){ clearInterval(statusPoll); statusPoll = null; }
+    if(device && device.gatt.connected) device.gatt.disconnect();
+    log("Getrennt");
+  } catch(e){ log("Disconnect error: "+e); }
   setStatus("Nicht verbunden");
   btnConnect.disabled = false; btnDisconnect.disabled = true;
 }
 
-// Send functions
+function onDisconnected(){ log("Device disconnected"); setStatus("Nicht verbunden"); btnConnect.disabled=false; btnDisconnect.disabled=true; if(statusPoll){ clearInterval(statusPoll); statusPoll=null; } }
+
 async function sendMode(m){
   if(!modeChar){ log("MODE Char nicht verfügbar"); return; }
-  try{
-    await modeChar.writeValue(new TextEncoder().encode(m));
-    log("MODE gesendet: " + m);
-  }catch(e){ log("MODE-Error: "+e); }
+  try{ await modeChar.writeValue(new TextEncoder().encode(m)); log("MODE gesendet: "+m); } catch(e){ log("MODE-Error: "+e); }
 }
 
 async function sendSpeed(s){
   if(!speedChar){ log("SPEED Char nicht verfügbar"); return; }
-  try{
-    await speedChar.writeValue(new TextEncoder().encode(String(s)));
-    log("SPEED gesendet: " + s);
-  }catch(e){ log("SPEED-Error: "+e); }
+  try{ await speedChar.writeValue(new TextEncoder().encode(String(s))); log("SPEED gesendet: "+s); } catch(e){ log("SPEED-Error: "+e); }
 }
 
 async function sendDirectCmd(cmd){
-  if(!ledChar){ log("LED Char nicht verfügbar; versuche trotzdem UI"); return applyDirectToUI(cmd); }
+  if(!ledChar){ log("LED Char nicht verfügbar"); return; }
   try{
     await ledChar.writeValue(new TextEncoder().encode(cmd));
-    log("DIRECT gesendet: " + cmd);
+    log("DIRECT gesendet: "+cmd);
+    parseDirectToLedStates(cmd);
+    renderLeds();
+  }catch(e){ log("DIRECT-Error: "+e); }
+}
+
+async function readAllOnce(){
+  // MODE read (if supported)
+  try{
+    if(modeChar){
+      const v = await modeChar.readValue();
+      const txt = decodeDataView(v).trim();
+      if(txt){ setStatus("Modus: " + txt); highlightMode(txt); }
+    }
+  }catch(e){}
+  try{
+    if(speedChar){
+      const v = await speedChar.readValue();
+      const txt = decodeDataView(v).trim();
+      if(txt){ speedSlider.value = Number(txt); speedVal.textContent = txt; }
+    }
+  }catch(e){}
+  try{
+    if(statusChar){
+      const v = await statusChar.readValue();
+      handleStatusPayload(decodeDataView(v));
+    } else if(ledChar){
+      // if no statusChar, try to read a last direct value from ledChar (if readable)
+      try{
+        const v = await ledChar.readValue();
+        const txt = decodeDataView(v).trim();
+        if(txt){ parseDirectToLedStates(txt); renderLeds(); }
+      }catch(e){}
+    }
+  }catch(e){}
+}
+
+function decodeDataView(dv){
+  try{
+    if(dv instanceof DataView) return new TextDecoder().decode(dv.buffer);
+    if(dv.buffer) return new TextDecoder().decode(dv.buffer);
+    return "";
+  }catch(e){ return ""; }
+}
+
+function onStatusNotification(ev){
+  try{
+    const txt = decodeDataView(ev.target.value);
+    handleStatusPayload(txt);
+  }catch(e){ log("Status notify parse error: "+e); }
+}
+
+function handleStatusPayload(txt){
+  if(!txt) return;
+  try{
+    const obj = JSON.parse(txt);
+    // update UI
+    if(obj.mode) setStatus("Modus: " + obj.mode);
+    if(typeof obj.speed !== "undefined"){ speedSlider.value = obj.speed; speedVal.textContent = String(obj.speed); }
+    if(Array.isArray(obj.led) && obj.led.length===3){
+      ledStates = obj.led.slice();
+      renderLeds();
+    }
+    document.getElementById("statusJson").textContent = JSON.stringify(obj, null, 2);
+    log("Status empfangen: " + JSON.stringify(obj));
   }catch(e){
-    log("DIRECT-Error: "+e);
+    // fallback: treat as direct string
+    parseDirectToLedStates(txt);
+    renderLeds();
   }
 }
 
-// Local animation preview (does not affect device unless mode sent)
-let animHandle = null;
-function stopLocalAnimation(){
-  if(animHandle) { clearInterval(animHandle); animHandle = null; }
-}
-function playLocalAnimation(mode){
-  stopLocalAnimation();
-  // Reset bulbs
-  lights.forEach(l=>l.setAttribute("aria-pressed","false"));
-  const speed = Number(speedSlider.value) || 200;
-
-  if(mode === "stop") return;
-  if(mode === "lauflicht"){
-    let i=0;
-    animHandle = setInterval(()=>{
-      lights.forEach((b,idx)=>b.setAttribute("aria-pressed", idx===i ? "true":"false"));
-      i = (i+1)%3;
-    }, speed);
+function parseDirectToLedStates(s){
+  if(!s) return;
+  s = s.toLowerCase().trim();
+  if(["rot","gelb","gruen","grün","aus"].includes(s)){
+    if(s==="rot"){ ledStates=[1023,0,0]; } else if(s==="gelb"){ ledStates=[0,1023,0]; }
+    else if(s==="gruen"||s==="grün"){ ledStates=[0,0,1023]; } else ledStates=[0,0,0];
     return;
   }
-  if(mode === "blinken"){
-    let on=false;
-    animHandle = setInterval(()=>{
-      lights.forEach(b=>b.setAttribute("aria-pressed", on?"true":"false"));
-      on = !on;
-    }, speed);
-    return;
+  // index:val pairs
+  let handled=false;
+  if(s.indexOf(':')>=0){
+    s.split(',').forEach(p=>{
+      if(p.indexOf(':')>=0){
+        const [a,b]=p.split(':',2); const idx=parseInt(a), val=parseInt(b);
+        if(!isNaN(idx)&&idx>=0&&idx<3&&!isNaN(val)){ ledStates[idx] = val; handled=true; }
+      }
+    });
+    if(handled) return;
   }
-  if(mode === "fading"){
-    // simple pseudo-fade: cycle each light on in sequence
-    let i=0;
-    animHandle = setInterval(()=>{
-      lights.forEach((b,idx)=>b.setAttribute("aria-pressed", idx===i ? "true":"false"));
-      i = (i+1)%3;
-    }, Math.max(80, Math.floor(speed/3)));
-    return;
+  // triple
+  const nums = s.replace(/[,;]/g,' ').split(/\s+/);
+  if(nums.length===3){
+    const r=parseInt(nums[0]), g=parseInt(nums[1]), b=parseInt(nums[2]);
+    if(!isNaN(r)&&!isNaN(g)&&!isNaN(b)){ ledStates=[r,g,b]; return; }
   }
-  if(mode === "mode3"){
-    let seq=[0,1,2,1], i=0;
-    animHandle = setInterval(()=>{
-      lights.forEach((b,idx)=>b.setAttribute("aria-pressed", idx===seq[i] ? "true":"false"));
-      i = (i+1)%seq.length;
-    }, speed);
-    return;
-  }
-  // fallback: single light rotate
-  let i=0; animHandle = setInterval(()=>{
-    lights.forEach((b,idx)=>b.setAttribute("aria-pressed", idx===i ? "true":"false"));
-    i=(i+1)%3;
-  }, speed);
 }
 
-// Cleanup when page hidden
-document.addEventListener("visibilitychange", ()=> {
-  if(document.hidden) stopLocalAnimation();
-});
+function renderLeds(){
+  for(let i=0;i<3;i++){
+    const el = document.getElementById("led"+i);
+    el.classList.remove("on-red","on-yellow","on-green");
+    const v = ledStates[i]||0;
+    if(v>0){
+      if(i===0) el.classList.add("on-red");
+      if(i===1) el.classList.add("on-yellow");
+      if(i===2) el.classList.add("on-green");
+    }
+  }
+}
 
-// Initialize UI from default
-speedVal.textContent = speedSlider.value;
+function highlightMode(modeTxt){
+  document.querySelectorAll(".mode").forEach(b=> b.style.outline = "");
+  if(!modeTxt) return;
+  const btn = document.querySelector(`.mode[data-mode="${modeTxt}"]`);
+  if(btn) btn.style.outline = "3px solid #6fbf73";
+}
